@@ -95,7 +95,7 @@ def generate_pdf(topic, ideas_text):
 
 
 def load_data():
-    """Загрузка данных из БД в DataFrame. Убрал кэш — обновляется сразу."""
+    """Загрузка данных из БД в DataFrame. Без кэша — обновляется сразу."""
     conn = sqlite3.connect(DB_FILE)
     df = pd.read_sql_query("SELECT * FROM posts ORDER BY date, time", conn)
     conn.close()
@@ -116,19 +116,20 @@ def add_post(date_str, time_str, title, content_type, format_str, rubrika, descr
         date_clean = date_str.replace(' г.', '').strip()
         date_parts = date_clean.split()
         if len(date_parts) != 3:
-            raise ValueError(f"Неверный формат даты: '{date_str}'. Ожидается 'dd месяц yyyy'.")
+            raise ValueError(
+                f"Неверный формат даты: '{date_str}'. Ожидается 'dd месяц yyyy'. Получено {len(date_parts)} частей: {date_parts}")
         day = int(date_parts[0])
         month_str = date_parts[1]
         year = int(date_parts[2])
 
-        # Словарь русских месяцев (на родительный падеж)
+        # Словарь английских месяцев (strftime('%B') даёт английский)
         month_names = {
-            'января': 1, 'февраля': 2, 'марта': 3, 'апреля': 4, 'мая': 5, 'июня': 6,
-            'июля': 7, 'августа': 8, 'сентября': 9, 'октября': 10, 'ноября': 11, 'декабря': 12
+            'January': 1, 'February': 2, 'March': 3, 'April': 4, 'May': 5, 'June': 6,
+            'July': 7, 'August': 8, 'September': 9, 'October': 10, 'November': 11, 'December': 12
         }
-        if month_str not in month_names:
-            raise ValueError(f"Неверный месяц: '{month_str}'. Допустимые: января, февраля и т.д.")
-        month = month_names[month_str]
+        month = month_names.get(month_str, 0)
+        if month == 0:
+            raise ValueError(f"Неверный месяц: '{month_str}'. Допустимые: January, February и т.д.")
 
         # Создаём datetime для дня недели
         dt = datetime(year, month, day)
