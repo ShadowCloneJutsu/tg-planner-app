@@ -1,6 +1,6 @@
 import streamlit as st
 import sqlite3
-import pandas as pd
+import pandas as st
 from datetime import datetime, date
 import io
 from fpdf import FPDF  # pip install fpdf2
@@ -21,6 +21,26 @@ except (KeyError, Exception) as e:
     client = None
     st.warning("HF токен не настроен. Генератор идей недоступен. Добавь HF_TOKEN в Secrets.")
 
+# CSS для равномерных кнопок в карточках (синие блоки, равные по размеру, как на фото)
+st.markdown("""
+<style>
+.stButton > button {
+    width: 100% !important;
+    height: 40px !important;
+    border-radius: 20px !important;
+    border: none !important;
+    background-color: #1f77b4 !important;
+    color: white !important;
+    font-weight: bold !important;
+    margin: 0 0 5px 0 !important;
+    padding: 0 10px !important;
+}
+.stButton > button:hover {
+    background-color: #155a8a !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # SQLite setup
 DB_FILE = 'tg_data.db'
 
@@ -39,7 +59,7 @@ def init_db():
             content_type TEXT,
             format TEXT,
             rubrika TEXT,
-    description TEXT,
+            description TEXT,
             tz_text TEXT,
             tz_visual TEXT,
             deadline TEXT,
@@ -109,31 +129,6 @@ def load_data():
     return df
 
 
-def parse_date_to_datetime(date_str):
-    """Парсинг русской даты в datetime для фильтра."""
-    try:
-        # Удаляем ' г.', разбиваем
-        date_clean = date_str.replace(' г.', '').strip()
-        parts = date_clean.split()
-        if len(parts) != 3:
-            return pd.NaT
-        day = int(parts[0])
-        month_str = parts[1]
-        year = int(parts[2])
-
-        # Словарь английских месяцев (для strptime, но используем ручной)
-        month_names = {
-            'January': 1, 'February': 2, 'March': 3, 'April': 4, 'May': 5, 'June': 6,
-            'July': 7, 'August': 8, 'September': 9, 'October': 10, 'November': 11, 'December': 12
-        }
-        month = month_names.get(month_str, 0)
-        if month == 0:
-            return pd.NaT
-        return pd.to_datetime(datetime(year, month, day))
-    except:
-        return pd.NaT
-
-
 def add_post(date_str, time_str, title, content_type, format_str, rubrika, description, tz_text, tz_visual, deadline):
     """Добавление нового поста в БД. С ручным парсингом даты и проверкой."""
     try:
@@ -147,7 +142,7 @@ def add_post(date_str, time_str, title, content_type, format_str, rubrika, descr
         month_str = date_parts[1]
         year = int(date_parts[2])
 
-        # Словарь английских месяцев (strftime('%B') даёт английский)
+        # Словарь английских месяцев (date_input возвращает английский)
         month_names = {
             'January': 1, 'February': 2, 'March': 3, 'April': 4, 'May': 5, 'June': 6,
             'July': 7, 'August': 8, 'September': 9, 'October': 10, 'November': 11, 'December': 12
@@ -176,10 +171,10 @@ def add_post(date_str, time_str, title, content_type, format_str, rubrika, descr
         conn.commit()
         last_id = cursor.lastrowid  # ID вставленного поста для debug
         conn.close()
-        st.write(f"Добавлено в БД: ID {last_id}")  # Debug — увидишь ID
+        st.write(f" Добавлено в БД: ID {last_id}")  # Debug — увидишь ID
         return True
     except Exception as e:
-        st.error(f"Ошибка добавления поста: {str(e)}")
+        st.error(f" Ошибка добавления поста: {str(e)}")
         return False
 
 
@@ -206,7 +201,7 @@ def update_status(row_id, status):
 
 
 def update_published(row_id, published):
-    """Обновление статуса 'Опубликовано'."""
+    """Обновление статуса ' Опубликовано'."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("UPDATE posts SET published = ? WHERE id = ?", (published, row_id))
@@ -221,6 +216,30 @@ def delete_post(row_id):
     cursor.execute("DELETE FROM posts WHERE id = ?", (row_id,))
     conn.commit()
     conn.close()
+
+
+# Функция парсинга даты для фильтра (без ошибок)
+def parse_date_to_datetime(date_str):
+    """Парсинг русской даты в datetime для фильтра."""
+    try:
+        date_clean = date_str.replace(' г.', '').strip()
+        date_parts = date_clean.split()
+        if len(date_parts) != 3:
+            return pd.NaT
+        day = int(date_parts[0])
+        month_str = date_parts[1]
+        year = int(date_parts[2])
+
+        month_names = {
+            'January': 1, 'February': 2, 'March': 3, 'April': 4, 'May': 5, 'June': 6,
+            'July': 7, 'August': 8, 'September': 9, 'October': 10, 'November': 11, 'December': 12
+        }
+        month = month_names.get(month_str, 0)
+        if month == 0:
+            return pd.NaT
+        return pd.to_datetime(datetime(year, month, day))
+    except:
+        return pd.NaT
 
 
 # Streamlit UI
@@ -238,7 +257,7 @@ st.sidebar.header("Фильтры")
 status_filter = st.sidebar.multiselect("Статус", ['Готов', 'Не готов'], default=['Не готов'])
 date_filter = st.sidebar.date_input("Дата от", value=date.today())
 
-# Фильтр с парсингом дат (без ошибки типа)
+# Фильтр с парсингом дат (без ошибки TypeError)
 try:
     df['Parsed Date'] = df['Date'].apply(parse_date_to_datetime)
     filtered_df = df[df['Status'].isin(status_filter)]
