@@ -13,7 +13,7 @@ except ImportError:
     HF_READY = False
     st.warning("huggingface-hub не установлен. Генератор идей временно недоступен.")
 
-# Hugging Face (с обработкой)
+# Hugging Face (с обработкой ошибки)
 try:
     HF_TOKEN = st.secrets["HF_TOKEN"]
     client = InferenceClient(token=HF_TOKEN) if HF_READY else None
@@ -26,6 +26,7 @@ DB_FILE = 'tg_data.db'
 
 
 def init_db():
+    """Инициализация БД: создание таблицы posts, если её нет."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute('''
@@ -50,6 +51,7 @@ def init_db():
 
 
 def generate_ideas(topic):
+    """Генерация идей от Hugging Face."""
     if not client:
         return "Генератор недоступен. Настрой HF_TOKEN в Secrets."
     prompt = f'Предложи 3-5 идей для поста в TG-канале о музыке по теме "{topic}". Укажи тип (информационный/вовлекающий/развлекательный), формат (интервью/новость/общение/видео/подкаст/мемы/туториал) и краткое описание. Нумеруй варианты. Ответь только списком идей.'
@@ -69,6 +71,7 @@ def generate_ideas(topic):
 
 
 def generate_pdf(topic, ideas_text):
+    """Генерация PDF с идеями."""
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
@@ -92,6 +95,7 @@ def generate_pdf(topic, ideas_text):
 
 @st.cache_data(ttl=300)
 def load_data():
+    """Загрузка данных из БД в DataFrame."""
     conn = sqlite3.connect(DB_FILE)
     df = pd.read_sql_query("SELECT * FROM posts ORDER BY date, time", conn)
     conn.close()
@@ -105,6 +109,7 @@ def load_data():
 
 
 def add_post(date_str, time_str, title, content_type, format_str, copywriter):
+    """Добавление нового поста в БД."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     day_of_week = datetime.strptime(date_str, '%d %B %Y г.').strftime('%A')
@@ -117,6 +122,7 @@ def add_post(date_str, time_str, title, content_type, format_str, copywriter):
 
 
 def update_post(row_id, updates):
+    """Обновление поста по ID."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     for col, val in updates.items():
@@ -128,6 +134,7 @@ def update_post(row_id, updates):
 
 
 def update_status(row_id, status):
+    """Обновление статуса поста."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("UPDATE posts SET status = ? WHERE id = ?", (status, row_id))
@@ -136,9 +143,19 @@ def update_status(row_id, status):
 
 
 def update_published(row_id, published):
+    """Обновление статуса 'Опубликовано'."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("UPDATE posts SET published = ? WHERE id = ?", (published, row_id))
+    conn.commit()
+    conn.close()
+
+
+def delete_post(row_id):
+    """Удаление поста по ID."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM posts WHERE id = ?", (row_id,))
     conn.commit()
     conn.close()
 
@@ -162,32 +179,38 @@ filtered_df = df[df['Status'].isin(status_filter)]
 if 'Date' in filtered_df.columns:
     filtered_df = filtered_df[pd.to_datetime(filtered_df['Date'], errors='coerce').dt.date >= date_filter]
 
-# Карточки постов
-cols = st.columns(3)
+# Карточки постов (с кнопкой удаления)
+cols = st.columns(4)  # 4 колонки для кнопок
 for idx, row in filtered_df.iterrows():
-    with cols[idx % 3]:
+    with cols[idx % 4]:
         with st.container():
             st.markdown(f"### {row.get('Title', 'Без названия')}")
             st.caption(f"📅 {row.get('Date', '')} | {row.get('Day Of Week', '')} | {row.get('Time', '')}")
             st.info(f"Тип: {row.get('Content Type', '')} | Формат: {row.get('Format', '')}")
             st.caption(
                 f"👥 {row.get('Copywriter', '')} → {row.get('Reviewer', '')} → {row.get('Designer', '')} → {row.get('Chief Editor', '')}")
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
                 if st.button("✏️ Правка", key=f"edit_{row.get('ID', idx)}"):
                     st.session_state.edit_row = row.get('ID')
             with col2:
-                if st.button("Готов" if row.get('Status', '') == 'Не готов' else "Не готов",
+                if st.button("✅ Готов" if row.get('Status', '') == 'Не готов' else "❌ Не готов",
                              key=f"status_{row.get('ID', idx)}"):
                     new_status = 'Готов' if row.get('Status', '') == 'Не готов' else 'Не готов'
                     update_status(row.get('ID'), new_status)
                     st.rerun()
             with col3:
-                published = 'Да' if row.get('Published', '') == 'Да' else 'Нет'
-                if st.button(published, key=f"pub_{row.get('ID', idx)}"):
+                if st.button("🚀 Да" if row.get('Published', '') == 'Нет' else "⏸️ Нет",
+                             key=f"pub_{row.get('ID', idx)}"):
                     new_published = 'Да' if row.get('Published', '') == 'Нет' else 'Нет'
                     update_published(row.get('ID'), new_published)
                     st.rerun()
+            with col4:
+                if st.button("🗑️ Удалить", key=f"delete_{row.get('ID', idx)}"):
+                    if st.button("Подтвердить удаление", key=f"confirm_delete_{row.get('ID', idx)}"):
+                        delete_post(row.get('ID'))
+                        st.success("Пост удалён!")
+                        st.rerun()
 
 # Правка поста
 if 'edit_row' in st.session_state:
@@ -283,7 +306,7 @@ with st.form("new_post"):
         st.success("Добавлено!")
         st.rerun()
 
-# Таблица всех постов
+# Таблица всех постов (с кнопкой удаления)
 st.markdown("---")
 st.header("📊 Таблица плана")
 if not df.empty:
@@ -308,6 +331,19 @@ if not df.empty:
     # Кнопка экспорта всей таблицы
     csv = df.to_csv(index=False, encoding='utf-8')
     st.download_button("📥 Экспорт всей таблицы в CSV", csv, "plan.csv", "text/csv")
+
+    # Цикл для кнопок удаления в таблице (для каждой строки)
+    st.subheader("Удаление постов из таблицы")
+    for idx, row in df.iterrows():
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write(f"Пост ID {row.get('ID', idx)}: {row.get('Title', 'Без названия')} ({row.get('Date', '')})")
+        with col2:
+            if st.button("🗑️ Удалить этот пост", key=f"table_delete_{row.get('ID', idx)}"):
+                if st.button("Подтвердить удаление", key=f"confirm_table_delete_{row.get('ID', idx)}"):
+                    delete_post(row.get('ID'))
+                    st.success("Пост удалён из таблицы!")
+                    st.rerun()
 else:
     st.info("Добавь первый пост через форму выше!")
 
