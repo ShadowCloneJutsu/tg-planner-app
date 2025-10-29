@@ -348,4 +348,4 @@ else:
     st.info("Добавь первый пост через форму выше!")
 
 st.markdown("---")
-st.caption("Ctrl+play")
+st.caption("ctrl+play")
