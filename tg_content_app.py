@@ -1,13 +1,11 @@
 import streamlit as st
 import sqlite3
-import pandas as st
+import pandas as pd
 from datetime import datetime, date
 import io
 from fpdf import FPDF  # pip install fpdf2
-
 try:
     from huggingface_hub import InferenceClient  # pip install huggingface-hub
-
     HF_READY = True
 except ImportError:
     HF_READY = False
@@ -21,29 +19,8 @@ except (KeyError, Exception) as e:
     client = None
     st.warning("HF токен не настроен. Генератор идей недоступен. Добавь HF_TOKEN в Secrets.")
 
-# CSS для равномерных кнопок в карточках (синие блоки, равные по размеру, как на фото)
-st.markdown("""
-<style>
-.stButton > button {
-    width: 100% !important;
-    height: 40px !important;
-    border-radius: 20px !important;
-    border: none !important;
-    background-color: #1f77b4 !important;
-    color: white !important;
-    font-weight: bold !important;
-    margin: 0 0 5px 0 !important;
-    padding: 0 10px !important;
-}
-.stButton > button:hover {
-    background-color: #155a8a !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
 # SQLite setup
 DB_FILE = 'tg_data.db'
-
 
 def init_db():
     """Инициализация БД: создание таблицы posts, если её нет."""
@@ -59,7 +36,7 @@ def init_db():
             content_type TEXT,
             format TEXT,
             rubrika TEXT,
-            description TEXT,
+    description TEXT,
             tz_text TEXT,
             tz_visual TEXT,
             deadline TEXT,
@@ -69,7 +46,6 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
-
 
 def generate_ideas(topic):
     """Генерация идей от Hugging Face."""
@@ -89,7 +65,6 @@ def generate_ideas(topic):
         return '\n'.join(ideas_list) if ideas_list else "Ошибка генерации."
     except Exception as e:
         return f"Ошибка HF: {str(e)}."
-
 
 def generate_pdf(topic, ideas_text):
     """Генерация PDF с идеями."""
@@ -113,7 +88,6 @@ def generate_pdf(topic, ideas_text):
     pdf_output.seek(0)
     return pdf_output.getvalue()
 
-
 def load_data():
     """Загрузка данных из БД в DataFrame. Без кэша — обновляется сразу."""
     conn = sqlite3.connect(DB_FILE)
@@ -128,6 +102,29 @@ def load_data():
     df.columns = ['ID'] + [c.capitalize().replace('_', ' ') for c in required_cols]
     return df
 
+def parse_date_to_datetime(date_str):
+    """Парсинг русской даты в datetime для фильтра."""
+    try:
+        # Удаляем ' г.', разбиваем
+        date_clean = date_str.replace(' г.', '').strip()
+        parts = date_clean.split()
+        if len(parts) != 3:
+            return pd.NaT
+        day = int(parts[0])
+        month_str = parts[1]
+        year = int(parts[2])
+
+        # Словарь английских месяцев (для strptime, но используем ручной)
+        month_names = {
+            'January': 1, 'February': 2, 'March': 3, 'April': 4, 'May': 5, 'June': 6,
+            'July': 7, 'August': 8, 'September': 9, 'October': 10, 'November': 11, 'December': 12
+        }
+        month = month_names.get(month_str, 0)
+        if month == 0:
+            return pd.NaT
+        return pd.to_datetime(datetime(year, month, day))
+    except:
+        return pd.NaT
 
 def add_post(date_str, time_str, title, content_type, format_str, rubrika, description, tz_text, tz_visual, deadline):
     """Добавление нового поста в БД. С ручным парсингом даты и проверкой."""
@@ -136,13 +133,12 @@ def add_post(date_str, time_str, title, content_type, format_str, rubrika, descr
         date_clean = date_str.replace(' г.', '').strip()
         date_parts = date_clean.split()
         if len(date_parts) != 3:
-            raise ValueError(
-                f"Неверный формат даты: '{date_str}'. Ожидается 'dd месяц yyyy'. Получено {len(date_parts)} частей: {date_parts}")
+            raise ValueError(f"Неверный формат даты: '{date_str}'. Ожидается 'dd месяц yyyy'. Получено {len(date_parts)} частей: {date_parts}")
         day = int(date_parts[0])
         month_str = date_parts[1]
         year = int(date_parts[2])
 
-        # Словарь английских месяцев (date_input возвращает английский)
+        # Словарь английских месяцев (strftime('%B') даёт английский)
         month_names = {
             'January': 1, 'February': 2, 'March': 3, 'April': 4, 'May': 5, 'June': 6,
             'July': 7, 'August': 8, 'September': 9, 'October': 10, 'November': 11, 'December': 12
@@ -166,30 +162,26 @@ def add_post(date_str, time_str, title, content_type, format_str, rubrika, descr
         cursor.execute('''
             INSERT INTO posts (date, day_of_week, time, title, content_type, format, rubrika, description, tz_text, tz_visual, deadline)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (date_str, day_ru, time_str, title, content_type, format_str, rubrika, description, tz_text, tz_visual,
-              deadline))
+        ''', (date_str, day_ru, time_str, title, content_type, format_str, rubrika, description, tz_text, tz_visual, deadline))
         conn.commit()
         last_id = cursor.lastrowid  # ID вставленного поста для debug
         conn.close()
-        st.write(f" Добавлено в БД: ID {last_id}")  # Debug — увидишь ID
+        st.write(f"Добавлено в БД: ID {last_id}")  # Debug — увидишь ID
         return True
     except Exception as e:
-        st.error(f" Ошибка добавления поста: {str(e)}")
+        st.error(f"Ошибка добавления поста: {str(e)}")
         return False
-
 
 def update_post(row_id, updates):
     """Обновление поста по ID."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     for col, val in updates.items():
-        col_map = {'Название': 'title', 'Тип контента': 'content_type', 'Формат': 'format', 'Рубрика': 'rubrika',
-                   'Описание': 'description', 'ТЗ(Текст)': 'tz_text', 'ТЗ(Визуал)': 'tz_visual', 'Дедлайн': 'deadline'}
+        col_map = {'Название': 'title', 'Тип контента': 'content_type', 'Формат': 'format', 'Рубрика': 'rubrika', 'Описание': 'description', 'ТЗ(Текст)': 'tz_text', 'ТЗ(Визуал)': 'tz_visual', 'Дедлайн': 'deadline'}
         sql_col = col_map.get(col, col.lower().replace(' ', '_'))
         cursor.execute(f"UPDATE posts SET {sql_col} = ? WHERE id = ?", (val, row_id))
     conn.commit()
     conn.close()
-
 
 def update_status(row_id, status):
     """Обновление статуса поста."""
@@ -199,15 +191,13 @@ def update_status(row_id, status):
     conn.commit()
     conn.close()
 
-
 def update_published(row_id, published):
-    """Обновление статуса ' Опубликовано'."""
+    """Обновление статуса 'Опубликовано'."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("UPDATE posts SET published = ? WHERE id = ?", (published, row_id))
     conn.commit()
     conn.close()
-
 
 def delete_post(row_id):
     """Удаление поста по ID."""
@@ -216,31 +206,6 @@ def delete_post(row_id):
     cursor.execute("DELETE FROM posts WHERE id = ?", (row_id,))
     conn.commit()
     conn.close()
-
-
-# Функция парсинга даты для фильтра (без ошибок)
-def parse_date_to_datetime(date_str):
-    """Парсинг русской даты в datetime для фильтра."""
-    try:
-        date_clean = date_str.replace(' г.', '').strip()
-        date_parts = date_clean.split()
-        if len(date_parts) != 3:
-            return pd.NaT
-        day = int(date_parts[0])
-        month_str = date_parts[1]
-        year = int(date_parts[2])
-
-        month_names = {
-            'January': 1, 'February': 2, 'March': 3, 'April': 4, 'May': 5, 'June': 6,
-            'July': 7, 'August': 8, 'September': 9, 'October': 10, 'November': 11, 'December': 12
-        }
-        month = month_names.get(month_str, 0)
-        if month == 0:
-            return pd.NaT
-        return pd.to_datetime(datetime(year, month, day))
-    except:
-        return pd.NaT
-
 
 # Streamlit UI
 st.set_page_config(page_title="TG Канал Планировщик", layout="wide", page_icon="🎵")
@@ -257,7 +222,7 @@ st.sidebar.header("Фильтры")
 status_filter = st.sidebar.multiselect("Статус", ['Готов', 'Не готов'], default=['Не готов'])
 date_filter = st.sidebar.date_input("Дата от", value=date.today())
 
-# Фильтр с парсингом дат (без ошибки TypeError)
+# Фильтр с парсингом дат (без ошибки типа)
 try:
     df['Parsed Date'] = df['Date'].apply(parse_date_to_datetime)
     filtered_df = df[df['Status'].isin(status_filter)]
@@ -274,8 +239,7 @@ for idx, row in filtered_df.iterrows():
         with st.container():
             st.markdown(f"### {row.get('Title', 'Без названия')}")
             st.caption(f"📅 {row.get('Date', '')} | {row.get('Day Of Week', '')} | {row.get('Time', '')}")
-            st.info(
-                f"Тип: {row.get('Content Type', '')} | Формат: {row.get('Format', '')} | Рубрика: {row.get('Rubrika', '')}")
+            st.info(f"Тип: {row.get('Content Type', '')} | Формат: {row.get('Format', '')} | Рубрика: {row.get('Rubrika', '')}")
             st.caption(f"Описание: {row.get('Description', '')[:50]}...")
             st.caption(f"ТЗ(Текст): {row.get('Tz Text', '')[:30]}... | ТЗ(Визуал): {row.get('Tz Visual', '')[:30]}...")
             st.caption(f"Дедлайн: {row.get('Deadline', '')}")
@@ -284,14 +248,12 @@ for idx, row in filtered_df.iterrows():
                 if st.button("✏️ Правка", key=f"edit_{row.get('ID', idx)}"):
                     st.session_state.edit_row = row.get('ID')
             with col2:
-                if st.button("✅ Готов" if row.get('Status', '') == 'Не готов' else "❌ Не готов",
-                             key=f"status_{row.get('ID', idx)}"):
+                if st.button("✅ Готов" if row.get('Status', '') == 'Не готов' else "❌ Не готов", key=f"status_{row.get('ID', idx)}"):
                     new_status = 'Готов' if row.get('Status', '') == 'Не готов' else 'Не готов'
                     update_status(row.get('ID'), new_status)
                     st.rerun()
             with col3:
-                if st.button("🚀 Да" if row.get('Published', '') == 'Нет' else "⏸️ Нет",
-                             key=f"pub_{row.get('ID', idx)}"):
+                if st.button("🚀 Да" if row.get('Published', '') == 'Нет' else "⏸️ Нет", key=f"pub_{row.get('ID', idx)}"):
                     new_published = 'Да' if row.get('Published', '') == 'Нет' else 'Нет'
                     update_published(row.get('ID'), new_published)
                     st.rerun()
@@ -308,21 +270,15 @@ if 'edit_row' in st.session_state:
         row_id = st.session_state.edit_row
         row = df[df['ID'] == row_id].iloc[0]
         new_name = st.text_input("Название", value=row.get('Title', ''))
-        new_type = st.selectbox("Тип контента", ['Информационный', 'Вовлекающий', 'Развлекательный'],
-                                key=f"type_{row_id}")
-        new_format = st.selectbox("Формат", ['Интервью', 'Новость', 'Общение', 'Видео', 'Подкаст', 'Мемы', 'Туториал'],
-                                  key=f"format_{row_id}")
+        new_type = st.selectbox("Тип контента", ['Информационный', 'Вовлекающий', 'Развлекательный'], key=f"type_{row_id}")
+        new_format = st.selectbox("Формат", ['Интервью', 'Новость', 'Общение', 'Видео', 'Подкаст', 'Мемы', 'Туториал'], key=f"format_{row_id}")
         new_rubrika = st.text_input("Рубрика", value=row.get('Rubrika', ''))
         new_description = st.text_area("Описание", value=row.get('Description', ''))
         new_tz_text = st.text_area("ТЗ(Текст)", value=row.get('Tz Text', ''))
         new_tz_visual = st.text_area("ТЗ(Визуал)", value=row.get('Tz Visual', ''))
-        new_deadline = st.date_input("Дедлайн", value=pd.to_datetime(row.get('Deadline', date.today()),
-                                                                     errors='coerce').date() if row.get(
-            'Deadline') else date.today())
+        new_deadline = st.date_input("Дедлайн", value=pd.to_datetime(row.get('Deadline', date.today()), errors='coerce').date() if row.get('Deadline') else date.today())
         if st.button("Сохранить правки"):
-            updates = {'Название': new_name, 'Тип контента': new_type, 'Формат': new_format, 'Рубрика': new_rubrika,
-                       'Описание': new_description, 'ТЗ(Текст)': new_tz_text, 'ТЗ(Визуал)': new_tz_visual,
-                       'Дедлайн': new_deadline.strftime('%d %B %Y г.')}
+            updates = {'Название': new_name, 'Тип контента': new_type, 'Формат': new_format, 'Рубрика': new_rubrika, 'Описание': new_description, 'ТЗ(Текст)': new_tz_text, 'ТЗ(Визуал)': new_tz_visual, 'Дедлайн': new_deadline.strftime('%d %B %Y г.')}
             update_post(row_id, updates)
             st.success("Сохранено!")
             del st.session_state.edit_row
@@ -358,19 +314,16 @@ if st.button("Генерировать варианты постов"):
                     csv_buffer = io.StringIO()
                     df_ideas.to_csv(csv_buffer, index=False, encoding='utf-8')
                     csv_data = csv_buffer.getvalue().encode('utf-8')
-                    st.download_button(label=f"Скачать {export_format}", data=csv_data, file_name=filename,
-                                       mime="text/csv")
+                    st.download_button(label=f"Скачать {export_format}", data=csv_data, file_name=filename, mime="text/csv")
 
                 elif export_format == 'TXT':
                     txt_content = f"Идеи для TG-поста: {topic}\n\n" + ideas_text
                     txt_data = txt_content.encode('utf-8')
-                    st.download_button(label=f"Скачать {export_format}", data=txt_data, file_name=filename,
-                                       mime="text/plain")
+                    st.download_button(label=f"Скачать {export_format}", data=txt_data, file_name=filename, mime="text/plain")
 
                 elif export_format == 'PDF':
                     pdf_data = generate_pdf(topic, ideas_text)
-                    st.download_button(label=f"Скачать {export_format}", data=pdf_data, file_name=filename,
-                                       mime="application/pdf")
+                    st.download_button(label=f"Скачать {export_format}", data=pdf_data, file_name=filename, mime="application/pdf")
 
             if st.button("Добавить как новый пост"):
                 today = datetime.now().strftime('%d %B %Y г.')
@@ -398,8 +351,7 @@ with st.form("new_post"):
     if submitted:
         date_str = new_date.strftime('%d %B %Y г.')
         deadline_str = new_deadline.strftime('%d %B %Y г.')
-        success = add_post(date_str, new_time.strftime('%H:%M'), new_title, new_type, new_format, new_rubrika,
-                           new_description, new_tz_text, new_tz_visual, deadline_str)
+        success = add_post(date_str, new_time.strftime('%H:%M'), new_title, new_type, new_format, new_rubrika, new_description, new_tz_text, new_tz_visual, deadline_str)
         if success:
             st.success("Добавлено!")
             st.rerun()
@@ -416,14 +368,11 @@ if not df.empty:
             return 'background-color: #d4edda'  # Зелёный
         else:
             return 'background-color: #f8d7da'  # Красный
-
-
     def color_published(val):
         if val == 'Да':
             return 'background-color: #d1ecf1'  # Синий
         else:
             return 'background-color: #fff3cd'  # Жёлтый
-
 
     styled_df = df.style.applymap(color_status, subset=['Status']).applymap(color_published, subset=['Published'])
     st.dataframe(styled_df, use_container_width=True)
