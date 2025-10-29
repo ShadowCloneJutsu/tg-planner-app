@@ -111,25 +111,26 @@ def load_data():
 
 
 def add_post(date_str, time_str, title, content_type, format_str, rubrika, description, tz_text, tz_visual, deadline):
-    """Добавление нового поста в БД. С ручным парсингом даты для избежания ошибки unpack."""
+    """Добавление нового поста в БД. С ручным парсингом даты и проверкой на количество частей."""
     try:
         # Ручной парсинг даты: удаляем ' г.', разбиваем на день/месяц/год
         date_clean = date_str.replace(' г.', '').strip()
         date_parts = date_clean.split()
         if len(date_parts) != 3:
-            raise ValueError(f"Неверный формат даты: '{date_str}'. Ожидается 'dd месяц yyyy'.")
+            raise ValueError(
+                f"Неверный формат даты: '{date_str}'. Ожидается 'dd месяц yyyy'. Получено {len(date_parts)} частей: {date_parts}")
         day = int(date_parts[0])
         month_str = date_parts[1]
         year = int(date_parts[2])
 
-        # Словарь русских месяцев для номера
-        month_names = {
-            'января': 1, 'февраля': 2, 'марта': 3, 'апреля': 4, 'мая': 5, 'июня': 6,
-            'июля': 7, 'августа': 8, 'сентября': 9, 'октября': 10, 'ноября': 11, 'декабря': 12
+        # Словарь английских месяцев (strftime дает английский)
+        month_names_en = {
+            'January': 1, 'February': 2, 'March': 3, 'April': 4, 'May': 5, 'June': 6,
+            'July': 7, 'August': 8, 'September': 9, 'October': 10, 'November': 11, 'December': 12
         }
-        if month_str not in month_names:
-            raise ValueError(f"Неверный месяц: '{month_str}'. Допустимые: январь, февраль и т.д.")
-        month_num = month_names[month_str]
+        month_num = month_names_en.get(month_str, 0)
+        if month_num == 0:
+            raise ValueError(f"Неверный месяц: '{month_str}'. Допустимые: January, February и т.д. (английские).")
 
         # Создаём datetime для дня недели
         dt = datetime(year, month_num, day)
@@ -140,19 +141,22 @@ def add_post(date_str, time_str, title, content_type, format_str, rubrika, descr
         }
         day_ru = days_ru.get(day_of_week_en, 'Неизвестный день')
 
-        # INSERT в БД
+        # INSERT в БД (11 параметров для 11 полей, status/published DEFAULT)
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO posts (date, day_of_week, time, title, content_type, format, rubrika, description, tz_text, tz_visual, deadline, status, published)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Не готов', 'Нет')
+            INSERT INTO posts (date, day_of_week, time, title, content_type, format, rubrika, description, tz_text, tz_visual, deadline)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (date_str, day_ru, time_str, title, content_type, format_str, rubrika, description, tz_text, tz_visual,
               deadline))
         conn.commit()
         conn.close()
         return True
+    except ValueError as ve:
+        st.error(f"Ошибка формата даты/месяца: {str(ve)}")
+        return False
     except Exception as e:
-        st.error(f"Ошибка добавления поста: {str(e)}. Проверь формат даты (дд месяц гггг г.) и данные.")
+        st.error(f"Ошибка добавления поста: {str(e)}")
         return False
 
 
