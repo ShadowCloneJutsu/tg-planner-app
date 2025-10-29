@@ -214,7 +214,7 @@ if 'edit_row' in st.session_state:
 # Генератор идей
 st.markdown("---")
 st.header("💡 Генератор идей от Hugging Face")
-topic = st.text_input("Введи тему или идею (например, 'рецензия на Pharaoh')")
+topic = st.text_input("Введи тему или идею")
 
 if 'generated_ideas' not in st.session_state:
     st.session_state.generated_ideas = None
