@@ -111,24 +111,38 @@ def load_data():
 
 
 def add_post(date_str, time_str, title, content_type, format_str, rubrika, description, tz_text, tz_visual, deadline):
-    """Добавление нового поста в БД. С try-except для отладки и ручным парсингом даты."""
+    """Добавление нового поста в БД. С ручным парсингом даты для избежания ошибки unpack."""
     try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        # Ручной парсинг даты для дня недели (на русском, без локали)
+        # Ручной парсинг даты: удаляем ' г.', разбиваем на день/месяц/год
+        date_clean = date_str.replace(' г.', '').strip()
+        date_parts = date_clean.split()
+        if len(date_parts) != 3:
+            raise ValueError(f"Неверный формат даты: '{date_str}'. Ожидается 'dd месяц yyyy'.")
+        day = int(date_parts[0])
+        month_str = date_parts[1]
+        year = int(date_parts[2])
+
+        # Словарь русских месяцев для номера
         month_names = {
             'января': 1, 'февраля': 2, 'марта': 3, 'апреля': 4, 'мая': 5, 'июня': 6,
             'июля': 7, 'августа': 8, 'сентября': 9, 'октября': 10, 'ноября': 11, 'декабря': 12
         }
-        day, month_str, year_str = date_str.split()
-        month = month_names[month_str]
-        dt = datetime(int(year_str.split('г.')[0]), month, int(day))
-        day_of_week = dt.strftime('%A')
+        if month_str not in month_names:
+            raise ValueError(f"Неверный месяц: '{month_str}'. Допустимые: январь, февраль и т.д.")
+        month_num = month_names[month_str]
+
+        # Создаём datetime для дня недели
+        dt = datetime(year, month_num, day)
+        day_of_week_en = dt.strftime('%A')
         days_ru = {
             'Monday': 'Понедельник', 'Tuesday': 'Вторник', 'Wednesday': 'Среда',
             'Thursday': 'Четверг', 'Friday': 'Пятница', 'Saturday': 'Суббота', 'Sunday': 'Воскресенье'
         }
-        day_ru = days_ru.get(day_of_week, 'Неизвестный день')
+        day_ru = days_ru.get(day_of_week_en, 'Неизвестный день')
+
+        # INSERT в БД
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
         cursor.execute('''
             INSERT INTO posts (date, day_of_week, time, title, content_type, format, rubrika, description, tz_text, tz_visual, deadline, status, published)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Не готов', 'Нет')
@@ -138,7 +152,7 @@ def add_post(date_str, time_str, title, content_type, format_str, rubrika, descr
         conn.close()
         return True
     except Exception as e:
-        st.error(f"Ошибка добавления поста: {str(e)}")  # Показывает ошибку в UI
+        st.error(f"Ошибка добавления поста: {str(e)}. Проверь формат даты (дд месяц гггг г.) и данные.")
         return False
 
 
