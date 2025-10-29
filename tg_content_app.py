@@ -26,7 +26,7 @@ DB_FILE = 'tg_data.db'
 
 
 def init_db():
-    """Инициализация БД: создание таблицы posts, если её нет. Добавлены новые колонки: rubrika, description, tz_text, tz_visual, deadline."""
+    """Инициализация БД: создание таблицы posts, если её нет."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute('''
@@ -111,22 +111,33 @@ def load_data():
 
 
 def add_post(date_str, time_str, title, content_type, format_str, rubrika, description, tz_text, tz_visual, deadline):
-    """Добавление нового поста в БД. Добавлен try-except для отладки."""
+    """Добавление нового поста в БД. С try-except для отладки."""
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        day_of_week = datetime.strptime(date_str, '%d %B %Y г.').strftime('%A')
+        # Ручной расчёт дня недели на русском (чтобы не зависеть от локали)
+        dt = datetime.strptime(date_str, '%d %B %Y г.')
+        day_of_week = dt.strftime('%A')  # 'Monday' и т.д.
+        days_ru = {
+            'Monday': 'Понедельник',
+            'Tuesday': 'Вторник',
+            'Wednesday': 'Среда',
+            'Thursday': 'Четверг',
+            'Friday': 'Пятница',
+            'Saturday': 'Суббота',
+            'Sunday': 'Воскресенье'
+        }
+        day_ru = days_ru.get(day_of_week, 'Неизвестный день')
         cursor.execute('''
             INSERT INTO posts (date, day_of_week, time, title, content_type, format, rubrika, description, tz_text, tz_visual, deadline, status, published)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Не готов', 'Нет')
-        ''', (
-        date_str, day_of_week, time_str, title, content_type, format_str, rubrika, description, tz_text, tz_visual,
-        deadline))
+        ''', (date_str, day_ru, time_str, title, content_type, format_str, rubrika, description, tz_text, tz_visual,
+              deadline))
         conn.commit()
         conn.close()
         return True
     except Exception as e:
-        st.error(f"Ошибка добавления поста: {str(e)}")
+        st.error(f"Ошибка добавления поста: {str(e)}")  # Показывает ошибку в UI
         return False
 
 
@@ -199,8 +210,7 @@ for idx, row in filtered_df.iterrows():
             st.info(
                 f"Тип: {row.get('Content Type', '')} | Формат: {row.get('Format', '')} | Рубрика: {row.get('Rubrika', '')}")
             st.caption(f"Описание: {row.get('Description', '')[:50]}...")
-            st.caption(
-                f"👥 ТЗ(Текст): {row.get('Tz Text', '')[:30]}... | ТЗ(Визуал): {row.get('Tz Visual', '')[:30]}...")
+            st.caption(f"ТЗ(Текст): {row.get('Tz Text', '')[:30]}... | ТЗ(Визуал): {row.get('Tz Visual', '')[:30]}...")
             st.caption(f"Дедлайн: {row.get('Deadline', '')}")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -239,8 +249,9 @@ if 'edit_row' in st.session_state:
         new_description = st.text_area("Описание", value=row.get('Description', ''))
         new_tz_text = st.text_area("ТЗ(Текст)", value=row.get('Tz Text', ''))
         new_tz_visual = st.text_area("ТЗ(Визуал)", value=row.get('Tz Visual', ''))
-        new_deadline = st.date_input("Дедлайн",
-                                     value=row.get('Deadline', date.today()) if row.get('Deadline') else date.today())
+        new_deadline = st.date_input("Дедлайн", value=pd.to_datetime(row.get('Deadline', date.today()),
+                                                                     errors='coerce').date() if row.get(
+            'Deadline') else date.today())
         if st.button("Сохранить правки"):
             updates = {'Название': new_name, 'Тип контента': new_type, 'Формат': new_format, 'Рубрика': new_rubrika,
                        'Описание': new_description, 'ТЗ(Текст)': new_tz_text, 'ТЗ(Визуал)': new_tz_visual,
@@ -255,7 +266,7 @@ st.markdown("---")
 st.header("💡 Генератор идей от Hugging Face")
 topic = st.text_input("Введи тему или идею")
 
-if 'generated_ideas' not in st.session_state:
+if 'generated_ideas' in st.session_state:
     st.session_state.generated_ideas = None
     st.session_state.generated_topic = None
 
@@ -302,7 +313,7 @@ if st.button("Генерировать варианты постов"):
     else:
         st.warning("Введи тему!")
 
-# Новый пост (обновленная форма: убраны старые поля, добавлены новые)
+# Новый пост (обновленная форма)
 st.markdown("---")
 st.header("➕ Новый пост")
 with st.form("new_post"):
@@ -326,7 +337,7 @@ with st.form("new_post"):
             st.success("Добавлено!")
             st.rerun()
         else:
-            st.error("Ошибка добавления. Проверь данные.")
+            st.error("Ошибка добавления. Проверь данные и формат.")
 
 # Таблица всех постов (с кнопкой удаления)
 st.markdown("---")
