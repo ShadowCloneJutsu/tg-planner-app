@@ -26,7 +26,7 @@ DB_FILE = 'tg_data.db'
 
 
 def init_db():
-    """Инициализация БД: создание таблицы posts, если её нет."""
+    """Инициализация БД: создание таблицы posts, если её нет. Добавлены новые колонки: rubrika, description, tz_text, tz_visual, deadline."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute('''
@@ -38,10 +38,11 @@ def init_db():
             title TEXT,
             content_type TEXT,
             format TEXT,
-            copywriter TEXT,
-            reviewer TEXT,
-            designer TEXT,
-            chief_editor TEXT,
+            rubrika TEXT,
+            description TEXT,
+            tz_text TEXT,
+            tz_visual TEXT,
+            deadline TEXT,
             status TEXT DEFAULT 'Не готов',
             published TEXT DEFAULT 'Нет'
         )
@@ -100,7 +101,8 @@ def load_data():
     df = pd.read_sql_query("SELECT * FROM posts ORDER BY date, time", conn)
     conn.close()
     required_cols = ['date', 'day_of_week', 'time', 'title', 'content_type', 'format',
-                     'copywriter', 'reviewer', 'designer', 'chief_editor', 'status', 'published']
+                     'rubrika', 'description', 'tz_text', 'tz_visual', 'deadline',
+                     'status', 'published']
     for col in required_cols:
         if col not in df.columns:
             df[col] = ''
@@ -108,17 +110,24 @@ def load_data():
     return df
 
 
-def add_post(date_str, time_str, title, content_type, format_str, copywriter):
-    """Добавление нового поста в БД."""
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    day_of_week = datetime.strptime(date_str, '%d %B %Y г.').strftime('%A')
-    cursor.execute('''
-        INSERT INTO posts (date, day_of_week, time, title, content_type, format, copywriter, status, published)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'Не готов', 'Нет')
-    ''', (date_str, day_of_week, time_str, title, content_type, format_str, copywriter))
-    conn.commit()
-    conn.close()
+def add_post(date_str, time_str, title, content_type, format_str, rubrika, description, tz_text, tz_visual, deadline):
+    """Добавление нового поста в БД. Добавлен try-except для отладки."""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        day_of_week = datetime.strptime(date_str, '%d %B %Y г.').strftime('%A')
+        cursor.execute('''
+            INSERT INTO posts (date, day_of_week, time, title, content_type, format, rubrika, description, tz_text, tz_visual, deadline, status, published)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Не готов', 'Нет')
+        ''', (
+        date_str, day_of_week, time_str, title, content_type, format_str, rubrika, description, tz_text, tz_visual,
+        deadline))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        st.error(f"Ошибка добавления поста: {str(e)}")
+        return False
 
 
 def update_post(row_id, updates):
@@ -126,7 +135,8 @@ def update_post(row_id, updates):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     for col, val in updates.items():
-        col_map = {'Название': 'title', 'Тип контента': 'content_type', 'Формат': 'format', 'Копирайтер': 'copywriter'}
+        col_map = {'Название': 'title', 'Тип контента': 'content_type', 'Формат': 'format', 'Рубрика': 'rubrika',
+                   'Описание': 'description', 'ТЗ(Текст)': 'tz_text', 'ТЗ(Визуал)': 'tz_visual', 'Дедлайн': 'deadline'}
         sql_col = col_map.get(col, col.lower().replace(' ', '_'))
         cursor.execute(f"UPDATE posts SET {sql_col} = ? WHERE id = ?", (val, row_id))
     conn.commit()
@@ -186,9 +196,12 @@ for idx, row in filtered_df.iterrows():
         with st.container():
             st.markdown(f"### {row.get('Title', 'Без названия')}")
             st.caption(f"📅 {row.get('Date', '')} | {row.get('Day Of Week', '')} | {row.get('Time', '')}")
-            st.info(f"Тип: {row.get('Content Type', '')} | Формат: {row.get('Format', '')}")
+            st.info(
+                f"Тип: {row.get('Content Type', '')} | Формат: {row.get('Format', '')} | Рубрика: {row.get('Rubrika', '')}")
+            st.caption(f"Описание: {row.get('Description', '')[:50]}...")
             st.caption(
-                f"👥 {row.get('Copywriter', '')} → {row.get('Reviewer', '')} → {row.get('Designer', '')} → {row.get('Chief Editor', '')}")
+                f"👥 ТЗ(Текст): {row.get('Tz Text', '')[:30]}... | ТЗ(Визуал): {row.get('Tz Visual', '')[:30]}...")
+            st.caption(f"Дедлайн: {row.get('Deadline', '')}")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 if st.button("✏️ Правка", key=f"edit_{row.get('ID', idx)}"):
@@ -222,13 +235,16 @@ if 'edit_row' in st.session_state:
                                 key=f"type_{row_id}")
         new_format = st.selectbox("Формат", ['Интервью', 'Новость', 'Общение', 'Видео', 'Подкаст', 'Мемы', 'Туториал'],
                                   key=f"format_{row_id}")
-        new_writer = st.text_input("Копирайтер", value=row.get('Copywriter', ''))
-        new_reviewer = st.text_input("Ревизор", value=row.get('Reviewer', ''))
-        new_designer = st.text_input("Дизайнер", value=row.get('Designer', ''))
-        new_chief = st.text_input("Глав. ред.", value=row.get('Chief Editor', ''))
+        new_rubrika = st.text_input("Рубрика", value=row.get('Rubrika', ''))
+        new_description = st.text_area("Описание", value=row.get('Description', ''))
+        new_tz_text = st.text_area("ТЗ(Текст)", value=row.get('Tz Text', ''))
+        new_tz_visual = st.text_area("ТЗ(Визуал)", value=row.get('Tz Visual', ''))
+        new_deadline = st.date_input("Дедлайн",
+                                     value=row.get('Deadline', date.today()) if row.get('Deadline') else date.today())
         if st.button("Сохранить правки"):
-            updates = {'Название': new_name, 'Тип контента': new_type, 'Формат': new_format, 'Копирайтер': new_writer,
-                       'Ревизор': new_reviewer, 'Дизайнер': new_designer, 'Глав. ред.': new_chief}
+            updates = {'Название': new_name, 'Тип контента': new_type, 'Формат': new_format, 'Рубрика': new_rubrika,
+                       'Описание': new_description, 'ТЗ(Текст)': new_tz_text, 'ТЗ(Визуал)': new_tz_visual,
+                       'Дедлайн': new_deadline.strftime('%d %B %Y г.')}
             update_post(row_id, updates)
             st.success("Сохранено!")
             del st.session_state.edit_row
@@ -280,31 +296,37 @@ if st.button("Генерировать варианты постов"):
 
             if st.button("Добавить как новый пост"):
                 today = datetime.now().strftime('%d %B %Y г.')
-                add_post(today, '', f'Идея по "{topic}" от HF', '', '', st.session_state.get('user', ''))
+                add_post(today, '', f'Идея по "{topic}" от HF', '', '', '', '', '', '', '')
                 st.success("Добавлено в план!")
                 st.rerun()
     else:
         st.warning("Введи тему!")
 
-# Новый пост
+# Новый пост (обновленная форма: убраны старые поля, добавлены новые)
 st.markdown("---")
 st.header("➕ Новый пост")
 with st.form("new_post"):
     new_date = st.date_input("Дата")
     new_time = st.time_input("Время")
-    new_name = st.text_input("Название/Идея")
+    new_title = st.text_input("Название/Идея")
     new_type = st.selectbox("Тип контента", ['Информационный', 'Вовлекающий', 'Развлекательный'])
     new_format = st.selectbox("Формат", ['Интервью', 'Новость', 'Общение', 'Видео', 'Подкаст', 'Мемы', 'Туториал'])
-    new_writer = st.text_input("Копирайтер")
-    new_reviewer = st.text_input("Ревизор")
-    new_designer = st.text_input("Дизайнер")
-    new_chief = st.text_input("Глав. ред.")
+    new_rubrika = st.text_input("Рубрика")
+    new_description = st.text_area("Описание", height=100)
+    new_tz_text = st.text_area("ТЗ(Текст)", height=100)
+    new_tz_visual = st.text_area("ТЗ(Визуал)", height=100)
+    new_deadline = st.date_input("Дедлайн")
     submitted = st.form_submit_button("Добавить")
     if submitted:
         date_str = new_date.strftime('%d %B %Y г.')
-        add_post(date_str, new_time.strftime('%H:%M'), new_name, new_type, new_format, new_writer)
-        st.success("Добавлено!")
-        st.rerun()
+        deadline_str = new_deadline.strftime('%d %B %Y г.')
+        success = add_post(date_str, new_time.strftime('%H:%M'), new_title, new_type, new_format, new_rubrika,
+                           new_description, new_tz_text, new_tz_visual, deadline_str)
+        if success:
+            st.success("Добавлено!")
+            st.rerun()
+        else:
+            st.error("Ошибка добавления. Проверь данные.")
 
 # Таблица всех постов (с кнопкой удаления)
 st.markdown("---")
