@@ -39,7 +39,7 @@ def init_db():
             content_type TEXT,
             format TEXT,
             rubrika TEXT,
-            description TEXT,
+    description TEXT,
             tz_text TEXT,
             tz_visual TEXT,
             deadline TEXT,
@@ -107,6 +107,31 @@ def load_data():
             df[col] = ''
     df.columns = ['ID'] + [c.capitalize().replace('_', ' ') for c in required_cols]
     return df
+
+
+def parse_date_to_datetime(date_str):
+    """Парсинг русской даты в datetime для фильтра."""
+    try:
+        # Удаляем ' г.', разбиваем
+        date_clean = date_str.replace(' г.', '').strip()
+        parts = date_clean.split()
+        if len(parts) != 3:
+            return pd.NaT
+        day = int(parts[0])
+        month_str = parts[1]
+        year = int(parts[2])
+
+        # Словарь английских месяцев (для strptime, но используем ручной)
+        month_names = {
+            'January': 1, 'February': 2, 'March': 3, 'April': 4, 'May': 5, 'June': 6,
+            'July': 7, 'August': 8, 'September': 9, 'October': 10, 'November': 11, 'December': 12
+        }
+        month = month_names.get(month_str, 0)
+        if month == 0:
+            return pd.NaT
+        return pd.to_datetime(datetime(year, month, day))
+    except:
+        return pd.NaT
 
 
 def add_post(date_str, time_str, title, content_type, format_str, rubrika, description, tz_text, tz_visual, deadline):
@@ -213,9 +238,15 @@ st.sidebar.header("Фильтры")
 status_filter = st.sidebar.multiselect("Статус", ['Готов', 'Не готов'], default=['Не готов'])
 date_filter = st.sidebar.date_input("Дата от", value=date.today())
 
-filtered_df = df[df['Status'].isin(status_filter)]
-if 'Date' in filtered_df.columns:
-    filtered_df = filtered_df[pd.to_datetime(filtered_df['Date'], errors='coerce').dt.date >= date_filter]
+# Фильтр с парсингом дат (без ошибки типа)
+try:
+    df['Parsed Date'] = df['Date'].apply(parse_date_to_datetime)
+    filtered_df = df[df['Status'].isin(status_filter)]
+    filtered_df = filtered_df[filtered_df['Parsed Date'].dt.date >= date_filter]
+    filtered_df = filtered_df.drop('Parsed Date', axis=1)
+except Exception as e:
+    st.warning(f"Ошибка фильтра даты: {str(e)}. Показываю все посты.")
+    filtered_df = df[df['Status'].isin(status_filter)]
 
 # Карточки постов (с кнопкой удаления)
 cols = st.columns(4)  # 4 колонки для кнопок
