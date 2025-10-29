@@ -111,21 +111,22 @@ def load_data():
 
 
 def add_post(date_str, time_str, title, content_type, format_str, rubrika, description, tz_text, tz_visual, deadline):
-    """Добавление нового поста в БД. С try-except для отладки."""
+    """Добавление нового поста в БД. С try-except для отладки и ручным парсингом даты."""
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        # Ручной расчёт дня недели на русском (чтобы не зависеть от локали)
-        dt = datetime.strptime(date_str, '%d %B %Y г.')
-        day_of_week = dt.strftime('%A')  # 'Monday' и т.д.
+        # Ручной парсинг даты для дня недели (на русском, без локали)
+        month_names = {
+            'января': 1, 'февраля': 2, 'марта': 3, 'апреля': 4, 'мая': 5, 'июня': 6,
+            'июля': 7, 'августа': 8, 'сентября': 9, 'октября': 10, 'ноября': 11, 'декабря': 12
+        }
+        day, month_str, year_str = date_str.split()
+        month = month_names[month_str]
+        dt = datetime(int(year_str.split('г.')[0]), month, int(day))
+        day_of_week = dt.strftime('%A')
         days_ru = {
-            'Monday': 'Понедельник',
-            'Tuesday': 'Вторник',
-            'Wednesday': 'Среда',
-            'Thursday': 'Четверг',
-            'Friday': 'Пятница',
-            'Saturday': 'Суббота',
-            'Sunday': 'Воскресенье'
+            'Monday': 'Понедельник', 'Tuesday': 'Вторник', 'Wednesday': 'Среда',
+            'Thursday': 'Четверг', 'Friday': 'Пятница', 'Saturday': 'Суббота', 'Sunday': 'Воскресенье'
         }
         day_ru = days_ru.get(day_of_week, 'Неизвестный день')
         cursor.execute('''
